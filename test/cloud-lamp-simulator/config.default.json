@@ -1,0 +1,14 @@
+{
+  "leds": {
+    "rows": 8,
+    "columns": 8,
+    "color": []
+  },
+  "settings": {
+    "cloudPassword": "",
+    "cloudUrl": "",
+    "cloudUser": "",
+    "mode": "server",
+    "primaryColor": "#000000"
+  }
+}

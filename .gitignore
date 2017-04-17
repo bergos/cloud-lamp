@@ -1,0 +1,5 @@
+.idea/
+data/.idea
+test/cloud-lamp-simulator/.idea/
+test/cloud-lamp-simulator/config.json
+test/cloud-lamp-simulator/node_modules/

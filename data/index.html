@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cloud Lamp</title>
+
+  <link rel="stylesheet" href="bootstrap.min.css">
+
+  <style>
+    body {
+      background-color: #000;
+      color: #888;
+    }
+
+    .form-group h3 {
+      display: inline;
+    }
+
+    .panel {
+
+      background-color: inherit;
+    }
+
+    .panel-default > .panel-heading {
+      background-color: inherit;
+      color: inherit;
+    }
+
+    .panel-heading h3 {
+      display: inline;
+    }
+
+    .well {
+      background-color: inherit;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="row">
+      <div class="col-xs-12 col-md-8 col-md-offset-2 col-lg-6 col-lg-offset-3">
+        <h1>Cloud Lamp</h1>
+
+        <div class="checkbox">
+          <label>
+            <input type="checkbox" id="enableLiveView"> Preview
+          </label>
+        </div>
+        <div class="text-center">
+          <canvas id="liveView" width="300" height="300"></canvas>
+        </div>
+
+        <form id="settings">
+          <div class="panel panel-default">
+            <div class="panel-body">
+              <div class="form-group">
+                <label for="primary-color">Primary Color</label>
+                <input type="color" class="form-control" name="primaryColor" value="#4444aa">
+              </div>
+            </div>
+          </div>
+
+          <h2>Mode</h2>
+
+          <div class="panel panel-default">
+            <div class="panel-heading">
+              <input type="radio" name="mode" value="cloud">
+              <h3>Cloud Sync</h3>
+            </div>
+          </div>
+
+          <div class="panel panel-default">
+            <div class="panel-heading">
+                <input type="radio" name="mode" value="solid">
+                <h3>Solid</h3>
+            </div>
+          </div>
+
+          <div class="panel panel-default">
+            <div class="panel-heading">
+              <input type="radio" name="mode" value="flash">
+              <h3>Flash</h3>
+            </div>
+          </div>
+
+          <div class="panel panel-default">
+            <div class="panel-heading">
+              <input type="radio" name="mode" value="server">
+              <h3>Server</h3>
+            </div>
+          </div>
+
+          <h2>Cloud Sync</h2>
+          <div class="panel panel-default">
+            <div class="panel-body">
+              <div class="checkbox">
+                <label>
+                  <input type="checkbox" name="cloudPush"> Push
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label for="cloud-url">URL</label>
+                <input type="text" class="form-control" name="cloudUrl" placeholder="http://example.org/cloud-lamp">
+              </div>
+              <div class="form-group">
+                <label for="cloud-user">User</label>
+                <input type="text" class="form-control" name="cloudUser" placeholder="user">
+              </div>
+              <div class="form-group">
+                <label for="cloud-password">Password</label>
+                <input type="password" class="form-control" name="cloudPassword" placeholder="password">
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-default pull-right" id="apply">Apply</button>
+
+          <div class="clearfix"></div>
+
+          <br>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="jquery.min.js"></script>
+  <script src="bootstrap.min.js"></script>
+
+  <script>
+    var config = {
+      ledsPullInterval: 100,
+      previewInterval: 1000 / 25
+    }
+
+    function get (url) {
+      return new Promise(function (resolve, reject) {
+        $.ajax({
+          url: url
+        }).done(function(data) {
+          resolve(data)
+        }).fail(function (err) {
+          reject(err)
+        })
+      })
+    }
+
+    function put (url, data, callback) {
+      return new Promise(function (resolve, reject) {
+        $.ajax({
+          method: 'PUT',
+          url: url,
+          contentType : 'application/json',
+          processData : false,
+          data: JSON.stringify(data)
+        }).done(function(data) {
+          resolve(data)
+        }).fail(function (err) {
+          reject(err)
+        })
+      })
+    }
+
+    function formToJson (root) {
+      return $(root).serializeArray().reduce(function (settings, pair) {
+        settings[pair.name] = pair.value
+
+        return settings
+      }, {})
+    }
+
+    function jsonToForm (root, json) {
+      root = $(root)
+
+      Object.keys(json).forEach(function (key) {
+        var value = json[key]
+
+        if ($('[name="' + key + '"][type="checkbox"]', root).length > 0) {
+          $('[name="' + key + '"]', root).prop('checked', value)
+        } else if ($('[name="' + key + '"][type="radio"]', root).length > 0) {
+          $('[name="' + key + '"][value="' + value + '"]', root).prop('checked', true)
+        } else {
+          $('[name="' + key + '"]', root).val(value)
+        }
+      })
+    }
+
+    get('settings').then(function (settings) {
+      jsonToForm('#settings', settings)
+    })
+
+    $('#apply').click(function (event) {
+      event.preventDefault()
+
+      var settings = formToJson('#settings')
+
+      put('settings', settings).then(function (newSettings) {
+        jsonToForm('#settings', newSettings)
+      })
+    })
+
+    /*
+        live view
+     */
+
+    var liveViewEnabled = false
+    var leds = null
+    var sphere = null
+    var rotation = 0
+    var distance = 0
+
+    function componentToHex (c) {
+      var hex = c.toString(16)
+
+      return hex.length == 1 ? '0' + hex : hex
+    }
+
+    function rgbToHex (rgb) {
+      return "#" + componentToHex(rgb[0]) + componentToHex(rgb[1]) + componentToHex(rgb[2])
+    }
+
+    function hexToRgb (hex) {
+      var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+
+      return result ? [
+        parseInt(result[1], 16),
+        parseInt(result[2], 16),
+        parseInt(result[3], 16)
+      ] : null
+    }
+
+    function rgbToRgbString (rgb) {
+      return 'rgb(' + rgb.map(Math.floor).join(',') + ')'
+    }
+
+    function hexToRgbString (hex) {
+      return rgbToRgbString(hexToRgb(hex, 1))
+    }
+
+    function Point3D (x, y, z, color) {
+      this.x = x || 0
+      this.y = y || 0
+      this.z = z || 0
+      this.color = color || [128, 128, 128]
+    }
+
+    function Sphere3D (radius, columns, rows) {
+      this.point = []
+      this.radius = radius
+      this.columns = columns
+      this.rows = rows
+
+      var columnStep = Math.PI * 2 / this.columns
+      var rowStep = Math.PI / (this.rows + 1)
+
+      for(var beta = - Math.PI / 2 + rowStep; beta < Math.PI / 2; beta += rowStep) {
+        var radius = Math.cos(beta) * this.radius
+        var fixedY = Math.sin(beta) * this.radius
+
+        for(var alpha = 0; alpha < Math.PI * 2; alpha += columnStep) {
+          this.point.push(new Point3D(Math.cos(alpha) * radius, fixedY, Math.sin(alpha) * radius))
+        }
+      }
+    }
+
+    function rotateX (point, radians) {
+      var y = point.y
+
+      point.y = (y * Math.cos(radians)) + (point.z * Math.sin(radians) * -1.0)
+      point.z = (y * Math.sin(radians)) + (point.z * Math.cos(radians))
+    }
+
+    function rotateY (point, radians) {
+      var x = point.x
+
+      point.x = (x * Math.cos(radians)) + (point.z * Math.sin(radians) * -1.0)
+      point.z = (x * Math.sin(radians)) + (point.z * Math.cos(radians))
+    }
+
+    function rotateZ (point, radians) {
+      var x = point.x
+
+      point.x = (x * Math.cos(radians)) + (point.y * Math.sin(radians) * -1.0)
+      point.y = (x * Math.sin(radians)) + (point.y * Math.cos(radians))
+    }
+
+    function projection (xy, z, xyOffset, zOffset, distance) {
+      return ((distance * xy) / (z - zOffset)) + xyOffset
+    }
+
+    function render() {
+      if (!liveViewEnabled || !leds) {
+        return
+      }
+
+      sphere = sphere || new Sphere3D(20, leds.columns, leds.rows)
+
+      var canvas = document.getElementById('liveView')
+      var width = canvas.getAttribute('width')
+      var height = canvas.getAttribute('height')
+      var ctx = canvas.getContext('2d')
+      var p = new Point3D()
+
+      ctx.save()
+      ctx.clearRect(0, 0, width, height)
+
+      ctx.globalCompositeOperation = 'lighter'
+
+      for(i = 0; i < sphere.point.length; i++) {
+        p.x = sphere.point[i].x
+        p.y = sphere.point[i].y
+        p.z = sphere.point[i].z
+        p.color = i < leds.color.length ? hexToRgb(leds.color[i]) : [0, 0, 0]
+
+        rotateX(p, rotation)
+        rotateY(p, rotation)
+        rotateZ(p, rotation)
+
+        var x = projection(p.x, p.z, width/2.0, 100.0, distance)
+        var y = projection(p.y, p.z, height/2.0, 100.0, distance)
+
+        if((x >= 0) && (x < width)) {
+          if((y >= 0) && (y < height)) {
+            drawPoint(ctx, x, y, 8 * (p.z + sphere.radius) / sphere.radius, p.color)
+          }
+        }
+      }
+
+      ctx.restore()
+
+      rotation += Math.PI / 90.0
+
+      if (distance < 500) {
+        distance += 10
+      }
+    }
+
+    function drawPoint(ctx, x, y, size, color) {
+      ctx.save()
+      ctx.beginPath()
+      ctx.fillStyle = rgbToRgbString(color)
+      ctx.arc(x, y, size, 0, 2*Math.PI, true)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    function getLeds () {
+      if (!liveViewEnabled) {
+        return
+      }
+
+      get('leds').then(function (newLeds) {
+        leds = newLeds
+      })
+    }
+
+    setInterval(getLeds, config.ledsPullInterval)
+    setInterval(render, config.previewInterval)
+
+    $('#enableLiveView').change(function (event) {
+      event.preventDefault()
+
+      liveViewEnabled = $('#enableLiveView').prop('checked')
+    })
+  </script>
+</body>
+</html>
